@@ -1,0 +1,386 @@
+Copilot_Debugging_Journey.txt
+
+========================================================= VS Code
+Copilot Custom Endpoint - Complete Debugging Journey
+=========================================================
+
+Purpose
+
+This document captures the complete debugging journey that led from a
+non-working Django gateway to a fully functional VS Code Copilot Custom
+Endpoint using OpenRouter streaming.
+
+This document is intended to help another AI assistant (Microsoft
+Copilot, GitHub Copilot, ChatGPT, etc.) immediately understand:
+
+-   what was attempted
+-   what failed
+-   why it failed
+-   how each issue was diagnosed
+-   how it was finally solved
+
+========================================================= Initial Goal
+=========================================================
+
+Architecture
+
+VS Code Copilot Chat | v Django REST API | v OpenRouter | v LLM
+
+Future target
+
+VS Code | Django | Ollama
+
+The endpoint implemented was:
+
+POST /v1/chat/completions/
+
+The endpoint was designed to mimic the OpenAI Chat Completions API.
+
+========================================================= Phase 1 -
+Django Gateway =========================================================
+
+Created a Django project with Django REST Framework.
+
+Installed:
+
+-   Django
+-   djangorestframework
+-   httpx
+-   python-dotenv
+
+Stored OpenRouter API key inside .env.
+
+Initial implementation simply proxied requests:
+
+request | httpx.post(…) | return Response(response.json())
+
+Thunder Client worked perfectly.
+
+Conclusion:
+
+The endpoint itself was correct.
+
+========================================================= Phase 2 - VS
+Code Integration
+=========================================================
+
+Configured chatLanguageModels.json.
+
+VS Code successfully recognized the custom model.
+
+However every request failed.
+
+No requests initially appeared in Django.
+
+Later confirmed the URL configuration and VS Code reached Django.
+
+========================================================= Phase 3 -
+Logging =========================================================
+
+Added detailed logging.
+
+Printed:
+
+-   incoming JSON
+-   HTTP status
+-   OpenRouter response
+
+Observed that VS Code sends an OpenAI Chat Completions request.
+
+Important payload:
+
+-   model
+-   messages
+-   tools
+-   tool_choice
+-   temperature
+-   top_p
+-   stream = true
+
+Important discovery:
+
+VS Code already sends everything required.
+
+The gateway should not modify the payload.
+
+========================================================= Mistake 1
+=========================================================
+
+Code forced
+
+payload[“stream”] = False
+
+Reason:
+
+Thunder Client only needed JSON.
+
+Result:
+
+VS Code displayed
+
+“Response contained no choices”
+
+Reason:
+
+VS Code expected streaming.
+
+Removing stream broke the protocol.
+
+Lesson:
+
+Never modify stream.
+
+========================================================= Mistake 2
+=========================================================
+
+Gateway returned
+
+Response(response.json())
+
+This buffers the complete response.
+
+Thunder Client accepted this.
+
+VS Code did not.
+
+Reason:
+
+VS Code Custom Endpoint expects Server-Sent Events (SSE).
+
+Lesson:
+
+StreamingHttpResponse is mandatory.
+
+========================================================= Phase 4 -
+Streaming =========================================================
+
+Attempted
+
+httpx.stream(…)
+
+Mistake:
+
+Used
+
+with httpx.stream(…) as response:
+
+then returned StreamingHttpResponse.
+
+Problem:
+
+The context manager exited before Django started streaming.
+
+Error:
+
+httpx.StreamClosed
+
+Lesson:
+
+Do not close the upstream stream before Django finishes.
+
+========================================================= Mistake 3
+=========================================================
+
+Tried accessing
+
+upstream.status_code
+
+on the object returned by client.stream().
+
+Error:
+
+’_GeneratorContextManager’ has no attribute ‘status_code’
+
+Reason:
+
+client.stream() returns a context manager.
+
+Not a Response.
+
+========================================================= Final Solution
+=========================================================
+
+Used:
+
+client = httpx.Client()
+
+request = client.build_request(…)
+
+upstream = client.send(request, stream=True)
+
+Then
+
+StreamingHttpResponse(generator())
+
+Generator iterated
+
+upstream.iter_bytes()
+
+Finally:
+
+upstream.close() client.close()
+
+This kept the upstream connection alive until Django finished sending
+every chunk to VS Code.
+
+========================================================= Final Working
+Flow =========================================================
+
+VS Code
+
+stream=true
+
+Django
+
+httpx Client
+
+OpenRouter
+
+Streaming Response
+
+Generator
+
+StreamingHttpResponse
+
+VS Code
+
+========================================================= Major Lessons
+Learned =========================================================
+
+1.  Thunder Client is not sufficient for testing.
+
+It accepts buffered JSON.
+
+VS Code requires streaming.
+
+------------------------------------------------------------------------
+
+2.  Do not change
+
+stream
+
+messages
+
+tools
+
+tool_choice
+
+temperature
+
+top_p
+
+Forward everything exactly as received.
+
+------------------------------------------------------------------------
+
+3.  
+
+StreamingHttpResponse is required.
+
+DRF Response() is not sufficient.
+
+------------------------------------------------------------------------
+
+4.  
+
+Keep the upstream connection open.
+
+Never exit the streaming context before Django finishes.
+
+------------------------------------------------------------------------
+
+5.  
+
+The gateway should be transparent.
+
+Its responsibility is
+
+Receive
+
+Authenticate
+
+Log
+
+Forward
+
+Return stream unchanged
+
+========================================================= Authentication
+Plan =========================================================
+
+Current implementation:
+
+Dummy API key inside chatLanguageModels.json.
+
+Future implementation:
+
+User logs into Django.
+
+↓
+
+Access Token (JWT)
+
+↓
+
+chatLanguageModels.json
+
+↓
+
+Authorization: Bearer
+
+↓
+
+JWT Authentication
+
+↓
+
+request.user
+
+↓
+
+Usage Logging
+
+↓
+
+OpenRouter / Ollama
+
+========================================================= Long-term
+Vision =========================================================
+
+The Django gateway should become provider independent.
+
+Today
+
+OpenRouter
+
+Tomorrow
+
+Ollama
+
+Later
+
+Azure OpenAI
+
+Gemini
+
+vLLM
+
+OpenAI
+
+The VS Code configuration should remain unchanged.
+
+Only the backend provider implementation should change.
+
+========================================================= Important Rule
+=========================================================
+
+Never design the gateway around OpenRouter.
+
+Design it around the OpenAI Chat Completions API.
+
+OpenRouter is only one provider.
+
+Ollama will later replace OpenRouter without requiring changes to VS
+Code.
+
+End of document.

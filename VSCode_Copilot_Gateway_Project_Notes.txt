@@ -1,6 +1,29 @@
 VS Code Copilot Custom Endpoint Gateway Project
 
-Objective
+==================================================== Environment Used
+During Development ====================================================
+
+VS Code Version
+
+VS Code Insiders 1.127.x (based on the development environment used).
+
+GitHub Copilot
+
+Built-in GitHub Copilot Chat with support for Custom Endpoints.
+
+Ollama VS Code Extension
+
+Not used.
+
+Reason: We intentionally did NOT use the Ollama extension because the
+objective of this project is to keep Django as the single AI Gateway.
+
+Architecture:
+
+VS Code | Django Gateway | OpenRouter (Current) | Future -> Ollama
+
+==================================================== Objective
+====================================================
 
 Build a Django REST Framework gateway that allows VS Code GitHub Copilot
 Chat (Custom Endpoint) to communicate with any LLM provider through a
@@ -10,19 +33,20 @@ Current Architecture:
 
 VS Code Copilot Chat | v Custom Endpoint | v Django REST API Gateway
 (/v1/chat/completions) | v OpenRouter (Current) | v LLM (NVIDIA Nemotron
-Free)
+/ Cohere during testing depending on model selected)
 
 Future Architecture:
 
-VS Code Copilot Chat | v Django REST API Gateway | +——> OpenRouter |
-+——> Ollama (Gemma 4) | +——> Other Providers
+VS Code Copilot Chat | v Django REST API Gateway | +–> OpenRouter +–>
+Ollama (Gemma 4) +–> Azure OpenAI +–> Gemini +–> Any OpenAI Compatible
+Provider
 
-  --------------
-  Project Goal
-  --------------
+==================================================== Project Goal
+====================================================
 
-The goal is to make VS Code communicate ONLY with Django. Django becomes
-the single gateway responsible for:
+The goal is to make VS Code communicate ONLY with Django.
+
+Django becomes the single gateway responsible for:
 
 -   Authentication
 -   Authorization
@@ -32,21 +56,80 @@ the single gateway responsible for:
 -   RAG (future)
 -   Conversation Storage
 -   Analytics
+-   Rate Limiting
+-   Cost Tracking
+-   Model Routing
 
 VS Code should never directly communicate with OpenRouter or Ollama.
 
-  --------------------------
-  Implementation Completed
-  --------------------------
+==================================================== VS Code Custom
+Endpoint Configuration
+====================================================
+
+The following file is the MOST IMPORTANT configuration inside VS Code.
+
+Filename:
+
+chatLanguageModels.json
+
+Current configuration used during development:
+
+[ { “name”: “Custom DRF Gateway v2”, “vendor”: “customendpoint”,
+“apiKey”: “dummy”, “apiType”: “chat-completions”, “models”: [ { “id”:
+“cohere/north-mini-code:free”, “name”: “cohere Free”, “url”:
+“http://127.0.0.1:8000/v1/chat/completions/”, “toolCalling”: true,
+“vision”: true, “maxInputTokens”: 128000, “maxOutputTokens”: 16000 } ]
+}]
+
+Meaning of every field
+
+name Friendly provider name shown inside VS Code.
+
+vendor Must always be “customendpoint”.
+
+apiKey VS Code automatically sends this value as
+
+    Authorization: Bearer <apiKey>
+
+    During testing we used:
+        dummy
+
+    Future:
+        JWT Access Token from Django Login.
+
+apiType We selected: chat-completions
+
+    This means VS Code expects an OpenAI Chat Completions compatible API.
+
+models List of models exposed by the gateway.
+
+id Value sent inside the request payload as:
+
+        "model": "<id>"
+
+name Friendly model name shown inside VS Code.
+
+url Django REST endpoint.
+
+toolCalling Enables OpenAI Tool Calling support.
+
+vision Advertises vision capability.
+
+maxInputTokens Maximum supported input context.
+
+maxOutputTokens Maximum supported output tokens.
+
+==================================================== Implementation
+Completed ====================================================
 
 1.  Created Django Project.
 
 2.  Installed:
 
-    -   Django
-    -   Django REST Framework
-    -   httpx
-    -   python-dotenv
+-   Django
+-   Django REST Framework
+-   httpx
+-   python-dotenv
 
 3.  Created endpoint:
 
@@ -59,14 +142,6 @@ POST /v1/chat/completions/
 6.  Verified endpoint using Thunder Client.
 
 7.  Configured VS Code Custom Endpoint.
-
-chatLanguageModels.json contains:
-
--   vendor = customendpoint
--   apiType = chat-completions
--   model
--   url
--   apiKey
 
 8.  Observed that VS Code sends an OpenAI Chat Completions request.
 
@@ -98,9 +173,8 @@ modifying them.
 
 VS Code -> Django -> OpenRouter works successfully.
 
-  ---------------------------
-  Important Lessons Learned
-  ---------------------------
+==================================================== Important Lessons
+Learned ====================================================
 
 1.  Never change request payload unless required.
 
@@ -118,16 +192,21 @@ VS Code sends stream=True.
 
 5.  Keep upstream connection alive until streaming finishes.
 
-  ----------------------
-  Current Request Flow
-  ----------------------
+6.  Do not replace StreamingHttpResponse with DRF Response().
 
-VS Code | | POST /v1/chat/completions | v Django
+7.  The gateway should behave like a transparent OpenAI-compatible
+    proxy.
+
+==================================================== Current Request
+Flow ====================================================
+
+VS Code | POST /v1/chat/completions | Django Gateway
 
 -   Receive request
--   Read Authorization header (future)
+-   (Future) Authenticate JWT
+-   Read Authorization header
 -   Read JSON payload
--   Forward request to OpenRouter
+-   Forward payload unchanged
 -   Stream response back
 
 OpenRouter
@@ -136,15 +215,14 @@ OpenRouter
 
 Django
 
--   Returns stream unchanged
+-   Returns stream unchanged using StreamingHttpResponse
 
 VS Code
 
--   Displays response.
+-   Displays streamed response.
 
-  ----------------------------
-  Future Authentication Plan
-  ----------------------------
+==================================================== Future
+Authentication Plan ====================================================
 
 Current idea:
 
@@ -154,35 +232,10 @@ Long-lived Access Token will be used inside VS Code.
 
 Flow:
 
-User Login
-
-↓
-
-Access Token
-
-↓
-
-chatLanguageModels.json
-
-↓
-
-Authorization: Bearer
-
-↓
-
-Django Gateway
-
-↓
-
-request.user available
-
-↓
-
-Log usage
-
-↓
-
-Forward request to OpenRouter/Ollama.
+User Login | Access Token | chatLanguageModels.json (apiKey field) |
+Authorization: Bearer | Django Gateway | JWT Authentication |
+request.user available | Log usage | Forward request to
+OpenRouter/Ollama
 
 Future enhancements:
 
@@ -192,9 +245,8 @@ Future enhancements:
 -   Rate limiting
 -   Subscription checks
 
-  ---------------------
-  Why Django Gateway?
-  ---------------------
+==================================================== Why Django Gateway?
+====================================================
 
 Advantages:
 
@@ -207,10 +259,12 @@ Advantages:
 -   Future RAG
 -   Prompt engineering
 -   Enterprise architecture
+-   Centralized authentication
+-   Centralized authorization
+-   Centralized observability
 
-  ---------------------
-  Immediate Next Task
-  ---------------------
+==================================================== Immediate Next Task
+====================================================
 
 Implement JWT authentication.
 
@@ -225,9 +279,8 @@ Requirements:
 No changes should be required in VS Code when switching from OpenRouter
 to Ollama.
 
-  ----------------------------------
-  Important Notes for Continuation
-  ----------------------------------
+==================================================== Important Notes for
+Continuation ====================================================
 
 The current views.py already implements the streaming proxy.
 
@@ -246,3 +299,7 @@ VS Code -> Provider
 
 The gateway should remain provider-agnostic so that only one provider
 module changes when migrating from OpenRouter to Ollama.
+
+IMPORTANT: Any future implementation (JWT, logging, RAG, provider
+routing, analytics, cost tracking, etc.) should preserve the OpenAI Chat
+Completions API contract so that no changes are required inside VS Code.

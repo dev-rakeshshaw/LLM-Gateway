@@ -1,0 +1,248 @@
+VS Code Copilot Custom Endpoint Gateway Project
+
+Objective
+
+Build a Django REST Framework gateway that allows VS Code GitHub Copilot
+Chat (Custom Endpoint) to communicate with any LLM provider through a
+single OpenAI-compatible endpoint.
+
+Current Architecture:
+
+VS Code Copilot Chat | v Custom Endpoint | v Django REST API Gateway
+(/v1/chat/completions) | v OpenRouter (Current) | v LLM (NVIDIA Nemotron
+Free)
+
+Future Architecture:
+
+VS Code Copilot Chat | v Django REST API Gateway | +——> OpenRouter |
++——> Ollama (Gemma 4) | +——> Other Providers
+
+  --------------
+  Project Goal
+  --------------
+
+The goal is to make VS Code communicate ONLY with Django. Django becomes
+the single gateway responsible for:
+
+-   Authentication
+-   Authorization
+-   Logging
+-   Prompt Processing
+-   Provider Selection
+-   RAG (future)
+-   Conversation Storage
+-   Analytics
+
+VS Code should never directly communicate with OpenRouter or Ollama.
+
+  --------------------------
+  Implementation Completed
+  --------------------------
+
+1.  Created Django Project.
+
+2.  Installed:
+
+    -   Django
+    -   Django REST Framework
+    -   httpx
+    -   python-dotenv
+
+3.  Created endpoint:
+
+POST /v1/chat/completions/
+
+4.  Stored OpenRouter API key inside .env
+
+5.  Implemented OpenAI Chat Completions compatible proxy.
+
+6.  Verified endpoint using Thunder Client.
+
+7.  Configured VS Code Custom Endpoint.
+
+chatLanguageModels.json contains:
+
+-   vendor = customendpoint
+-   apiType = chat-completions
+-   model
+-   url
+-   apiKey
+
+8.  Observed that VS Code sends an OpenAI Chat Completions request.
+
+Payload contains fields such as:
+
+-   model
+-   messages
+-   tools
+-   tool_choice
+-   temperature
+-   top_p
+-   stream
+
+9.  Initial implementation returned JSON using DRF Response().
+
+Thunder Client worked.
+
+VS Code failed because it expects streaming.
+
+10. Implemented Streaming Proxy using:
+
+-   httpx
+-   StreamingHttpResponse
+
+The gateway now forwards streaming bytes from OpenRouter without
+modifying them.
+
+11. Result:
+
+VS Code -> Django -> OpenRouter works successfully.
+
+  ---------------------------
+  Important Lessons Learned
+  ---------------------------
+
+1.  Never change request payload unless required.
+
+Forward everything exactly as received.
+
+2.  Never force:
+
+payload[“stream”] = False
+
+VS Code sends stream=True.
+
+3.  Use streaming mode with OpenRouter.
+
+4.  Forward stream using Django StreamingHttpResponse.
+
+5.  Keep upstream connection alive until streaming finishes.
+
+  ----------------------
+  Current Request Flow
+  ----------------------
+
+VS Code | | POST /v1/chat/completions | v Django
+
+-   Receive request
+-   Read Authorization header (future)
+-   Read JSON payload
+-   Forward request to OpenRouter
+-   Stream response back
+
+OpenRouter
+
+-   Generates streamed response
+
+Django
+
+-   Returns stream unchanged
+
+VS Code
+
+-   Displays response.
+
+  ----------------------------
+  Future Authentication Plan
+  ----------------------------
+
+Current idea:
+
+Use JWT authentication from the existing Django application.
+
+Long-lived Access Token will be used inside VS Code.
+
+Flow:
+
+User Login
+
+↓
+
+Access Token
+
+↓
+
+chatLanguageModels.json
+
+↓
+
+Authorization: Bearer
+
+↓
+
+Django Gateway
+
+↓
+
+request.user available
+
+↓
+
+Log usage
+
+↓
+
+Forward request to OpenRouter/Ollama.
+
+Future enhancements:
+
+-   Refresh Token
+-   Personal Access Tokens
+-   Usage dashboard
+-   Rate limiting
+-   Subscription checks
+
+  ---------------------
+  Why Django Gateway?
+  ---------------------
+
+Advantages:
+
+-   Single entry point
+-   Provider independent
+-   Easy switch OpenRouter -> Ollama
+-   User tracking
+-   Logging
+-   Security
+-   Future RAG
+-   Prompt engineering
+-   Enterprise architecture
+
+  ---------------------
+  Immediate Next Task
+  ---------------------
+
+Implement JWT authentication.
+
+Requirements:
+
+1.  VS Code sends JWT in Authorization header.
+2.  Django authenticates user.
+3.  request.user becomes available.
+4.  Save API usage.
+5.  Forward authenticated request to OpenRouter.
+
+No changes should be required in VS Code when switching from OpenRouter
+to Ollama.
+
+  ----------------------------------
+  Important Notes for Continuation
+  ----------------------------------
+
+The current views.py already implements the streaming proxy.
+
+Do NOT replace it with a normal DRF Response().
+
+The gateway must continue using StreamingHttpResponse for compatibility
+with VS Code Custom Endpoint.
+
+The project philosophy is:
+
+VS Code -> Django Gateway -> Provider
+
+instead of
+
+VS Code -> Provider
+
+The gateway should remain provider-agnostic so that only one provider
+module changes when migrating from OpenRouter to Ollama.
